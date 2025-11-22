@@ -7,16 +7,16 @@
 #define DT_PIN A1
 #define SCK_PIN A0
 
-#define LED_SUP 9     // LED para limite superior
-#define LED_INF 8     // LED para limite inferior
+#define LED_SUP 9
+#define LED_INF 8
 
-#define POT_PIN A2    // potenciômetro para ajustar limites
+#define POT_PIN A2
 
-#define BUZZER 10     // BUZZER ATIVO
+#define BUZZER 10
 
-// LCD (RS, E, D4, D5, D6, D7)
+#define BOTAO 7   // Botão de 3 estágios
+
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
-
 HX711 balanca;
 
 // =====================
@@ -29,10 +29,17 @@ bool calibrado = false;
 float limiteSuperior = 0.5;
 float limiteInferior = 0.2;
 
-float pesoReferencia = 1.0;  // 1 kg para calibrar
+float pesoReferencia = 1.0;
+
+// ----- Botão -----
+int estadoBotao;
+int ultimoEstadoBotao = HIGH;
+unsigned long debounce = 0;
+int passo = 0;  // 1 = lim sup | 2 = lim inf | 3 = leitura
+
 
 // =====================
-// LER POTENCIÔMETRO (0–5 kg)
+// Ler potenciômetro (0–5 kg)
 // =====================
 float lerLimitePot() {
   int leitura = analogRead(POT_PIN);
@@ -40,57 +47,9 @@ float lerLimitePot() {
   return kg;
 }
 
-// =====================
-// AJUSTAR LIMITES
-// =====================
-void ajustarLimites() {
-
-  // ---- Ajuste do limite inferior ----
-  lcd.clear();
-  lcd.print("Ajuste LIMITE");
-  lcd.setCursor(0, 1);
-  lcd.print("INFERIOR...");
-  delay(1800);
-
-  unsigned long t0 = millis();
-  while (millis() - t0 < 8000) {  
-    limiteInferior = lerLimitePot();
-
-    lcd.clear();
-    lcd.print("Lim Inf: ");
-    lcd.print(limiteInferior, 2);
-    lcd.print(" kg");
-
-    delay(300);
-  }
-
-  // ---- Ajuste do limite superior ----
-  lcd.clear();
-  lcd.print("Ajuste LIMITE");
-  lcd.setCursor(0, 1);
-  lcd.print("SUPERIOR...");
-  delay(1800);
-
-  t0 = millis();
-  while (millis() - t0 < 8000) {  
-    limiteSuperior = lerLimitePot();
-
-    lcd.clear();
-    lcd.print("Lim Sup: ");
-    lcd.print(limiteSuperior, 2);
-    lcd.print(" kg");
-
-    delay(300);
-  }
-
-  // Limites confirmados
-  lcd.clear();
-  lcd.print("Limites salvos!");
-  delay(1500);
-}
 
 // =====================
-// CALIBRAÇÃO
+// Calibração
 // =====================
 void calibrar() {
 
@@ -121,10 +80,12 @@ void calibrar() {
   lcd.clear();
 }
 
+
 // =====================
 // SETUP
 // =====================
 void setup() {
+
   Serial.begin(9600);
   lcd.begin(16, 2);
 
@@ -132,72 +93,142 @@ void setup() {
   pinMode(LED_INF, OUTPUT);
   pinMode(BUZZER, OUTPUT);
 
+  pinMode(BOTAO, INPUT_PULLUP);
+
   digitalWrite(LED_SUP, LOW);
   digitalWrite(LED_INF, LOW);
-  digitalWrite(BUZZER, LOW); // buzzer ativo começa desligado
+  digitalWrite(BUZZER, LOW);
 
-  // Inicia HX711
   balanca.begin(DT_PIN, SCK_PIN);
   balanca.set_scale();
   balanca.tare();
 
-  // --- AJUSTE DOS LIMITES ---
-  ajustarLimites();
-
-  // --- CALIBRAR COM 1 kg ---
   lcd.clear();
-  lcd.print("Coloque 1 kg");
+  lcd.print("Aguardando botoes");
   lcd.setCursor(0, 1);
-  lcd.print("para calibrar...");
-  delay(6000);
-
-  calibrar();
+  lcd.print("3 etapas...");
 }
+
 
 // =====================
 // LOOP PRINCIPAL
 // =====================
 void loop() {
 
+  // ------------------------------------------------------------------
+  // LEITURA DO BOTÃO (FUNCIONA EM TODOS OS PASSOS)
+  // ------------------------------------------------------------------
+
+  estadoBotao = digitalRead(BOTAO);
+
+  if (estadoBotao != ultimoEstadoBotao) {
+    if (millis() - debounce > 200) {
+      debounce = millis();
+
+      if (estadoBotao == LOW) {  // botão pressionado
+
+        passo++;
+
+        if (passo == 1) {
+          lcd.clear();
+          lcd.print("Ajuste Lim Sup");
+          delay(200);
+        }
+
+        else if (passo == 2) {
+          lcd.clear();
+          lcd.print("Ajuste Lim Inf");
+          delay(200);
+        }
+
+        else if (passo == 3) {
+          lcd.clear();
+          lcd.print("Coloque 1 kg...");
+          lcd.setCursor(0, 1);
+          lcd.print("para calibrar");
+          delay(6000);
+
+          calibrar();
+
+          lcd.clear();
+          lcd.print("Iniciando...");
+          delay(1000);
+        }
+      }
+    }
+  }
+
+  ultimoEstadoBotao = estadoBotao;
+
+
+  // ------------------------------------------------------------------
+  // AJUSTE DO LIMITE SUPERIOR  (PASSO 1)
+  // ------------------------------------------------------------------
+  if (passo == 1) {
+
+    limiteSuperior = lerLimitePot();
+
+    lcd.setCursor(0, 1);
+    lcd.print(limiteSuperior, 2);
+    lcd.print(" kg    ");
+
+    delay(100);
+    return;
+  }
+
+
+  // ------------------------------------------------------------------
+  // AJUSTE DO LIMITE INFERIOR  (PASSO 2)
+  // ------------------------------------------------------------------
+  if (passo == 2) {
+
+    limiteInferior = lerLimitePot();
+
+    lcd.setCursor(0, 1);
+    lcd.print(limiteInferior, 2);
+    lcd.print(" kg    ");
+
+    delay(100);
+    return;
+  }
+
+
+  // ------------------------------------------------------------------
+  // SÓ COMEÇA A LER PESO APÓS O PASSO 3
+  // ------------------------------------------------------------------
+  if (passo < 3) return;
+
+
+  // ========================
+  // LEITURA DA BALANÇA
+  // ========================
   if (calibrado) {
 
     peso = balanca.get_units(10);
 
-    // Exibição do peso
     lcd.setCursor(0, 0);
     lcd.print("Peso: ");
     lcd.print(peso, 3);
-    lcd.print(" kg ");
+    lcd.print(" kg  ");
 
-    // =========================
-    // ALERTAS COM LEDs + BUZZER (ATIVO)
-    // =========================
-
-    // ---- LIMITE SUPERIOR ----
+    // ALERTAS
     if (peso > limiteSuperior) {
-      digitalWrite(LED_SUP, HIGH);
-      digitalWrite(BUZZER, HIGH);   // buzzer ligado
-    }
-    else {
-      digitalWrite(LED_SUP, LOW);
-      digitalWrite(BUZZER, LOW);    // buzzer desligado
+        digitalWrite(LED_SUP, HIGH);
+        digitalWrite(BUZZER, HIGH);
+    } else {
+        digitalWrite(LED_SUP, LOW);
     }
 
-    // ---- LIMITE INFERIOR ----
     if (peso < limiteInferior) {
-      digitalWrite(LED_INF, HIGH);
-      digitalWrite(BUZZER, HIGH);   // buzzer ligado
-    }
-    else {
-      digitalWrite(LED_INF, LOW);
+        digitalWrite(LED_INF, HIGH);
+        digitalWrite(BUZZER, HIGH);
+    } else {
+        digitalWrite(LED_INF, LOW);
 
-      // se dentro da faixa, buzzer desliga
-      if (peso <= limiteSuperior) {
-        digitalWrite(BUZZER, LOW);
-      }
+        if (peso <= limiteSuperior) {
+            digitalWrite(BUZZER, LOW);
+        }
     }
-
-    // Mensagem da linha 2
 
     lcd.setCursor(0, 1);
     if (peso > limiteSuperior) {
@@ -210,6 +241,6 @@ void loop() {
       lcd.print("Dentro da faixa  ");
     }
 
-    delay(400);
+    delay(300);
   }
 }
